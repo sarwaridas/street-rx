@@ -1,0 +1,216 @@
+---
+title: "IDS 702 Group Project 2: StreetRx"
+author: "Peining Yang (Checker), Sarwari Das (Coordinator), Michelle Van (Presenter),"
+date: "John Owusu Duah (Programmer), Satvik Kishore (Writer)"
+output: pdf_document
+geometry: margin=1.5cm
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = "hide", fig.pos = "H")
+library(dplyr)
+library(tidyverse)
+library(forcats)
+library(ggplot2)
+library(readr)
+library(lme4)
+library(lattice)
+library(cowplot)
+library(kableExtra)
+library(stargazer)
+library(car)
+```
+
+```{r results = "hide"}
+dta <- read.csv("../Data/part1/cleaned_data.csv", header = TRUE,sep = ",",stringsAsFactors = FALSE)
+dta <- subset(dta, select = -c(X,form_temp)) #removing index and form column
+str(dta)
+f_cols= c('USA_region','source','bulk_purchase','state') #changing to factor dtype
+dta[f_cols] = lapply(dta[f_cols], as.factor) #changing to factor dtype
+levels(dta$bulk_purchase)= c("Not Bulk Purchase","Bulk Purchase")
+
+#moved all websites to internet
+dta$source_new<- dta$source
+dta$source_new <- fct_collapse(dta$source_new, Online = c("Tramadolprices,co", "Streetrx.com","https://addictionresource.com/drugs/tramadol/tramadol-street-prices/","http://silkroadvb5piz3r.onion/silkroad/category/51/225",
+                                                          "http://silkroadvb5piz3r.onion/index.php/silkroad/item/36f1908da6",
+                                                          "http://silkroadvb5piz3r.onion/index.php/silkroad/item/6e3cd15aa1" ,
+                                                          "http://silkroadvb5piz3r.onion/index.php/silkroad/item/740d0d5672",
+                                                          "http://silkroadvb5piz3r.onion/index.php/silkroad/item/8bdcb5d15a" ,
+                                                          "http://silkroadvb5piz3r.onion/index.php/silkroad/item/ac63e18eb1",
+                                                         "http://silkroadvb5piz3r.onion/index.php/silkroad/item/aeddba3b9b", 
+                                                          "http://silkroadvb5piz3r.onion/index.php/silkroad/item/b2eb490fb4",                                               "http://silkroadvb5piz3r.onion/index.php/silkroad/item/cc7cf796da" ,
+"http://silkroadvb5piz3r.onion/silkroad/category/240" ,
+                                                          "http://silkroadvb5piz3r.onion/silkroad/category/240/100",
+                                                          "http://silkroadvb5piz3r.onion/silkroad/category/240/125" ,
+                                                          "http://silkroadvb5piz3r.onion/silkroad/category/240/150",  
+                                                          "http://silkroadvb5piz3r.onion/silkroad/category/240/50" ,
+                                                          "http://silkroadvb5piz3r.onion/silkroad/category/240/75",
+                                                          "http://silkroadvb5piz3r.onion/silkroad/category/51/125" ,
+                                                          "http://silkroadvb5piz3r.onion/silkroad/category/51/150" ,
+                                                          "http://silkroadvb5piz3r.onion/silkroad/category/51/200",
+                                                          "Drugs.com","streetrx.com","Blue Gold : World Water Wars (Official Full Lengt???: http://youtu.be/B1a3tjqQiBI","Google"))
+
+levels(dta$source_new)<- c("Others" ,"Internet" , "Heard it","Internet", "Internet Pharmacy", "Personal")
+table(dta$source_new)
+str(dta)
+
+nulls = sapply(dta, function(col) sum(length(which(is.na(col))))); nulls #checking for nulls
+#Null data for price (7 points), we can't use this
+#Hoping regression ignores the 7 nulls
+table(dta$state) #Have enough data across regions -- the state of USA is being treated as "other"
+summary(dta$ppm)#Price has outliers - not removing them though
+
+dta$logppm <- log(dta$ppm)
+dta$mgstr_f <- factor(dta$mgstr)
+
+```
+
+# Summary
+
+In this report, we analyzed data regarding street prices of Tramadol, a pain relief medication, collected through a crowd-sourcing website StreetRx. We investigated the factors that are associated with the price of Tramadol, as well as whether the difference in location contributed to the variation in price. Results showed that the drug's dosage is statistically significant in association with the price, with random variations based on the state and US region where the information is reported. 
+
+# Introduction
+
+_StreetRx (streetrx.com)_ is a website where users can self report information regarding street prices of various pharmaceutical substances. It allows users to anonymously input prices they paid or heard about for prescription drugs, which provides insights about the black market and enhances efforts of public health surveillance. In this assignment, we will analyze data collected by the _StreetRx_ website on Tramadol, a narcotic used to treat mild to severe pain. We will fit a hierarchical model in order to investigate the factors influencing the price/mg of Tramadol, accounting for the potential clustering by state and US regions. 
+
+# Data
+
+The dataset we used contains 5 response variables, which are _state_ and _USA_region_: factor variables of the state and US region in which the information is reported from, _source_: which is a factor variable of the source of information, _mgstr_: which is a factor variable of the dosage strength in mg of the units purchased and _bulk_purchase_: which is a binary variable indicating whether the drug was purchased in bulk or not. The response variable of our analysis is _ppm_, which is a numeric variable for price per mg. 
+
+Originally, the _source_ variable contained multiple websites that user entered. For ease of analysis, we grouped all sources which are websites into the level "Internet". In addition, we also had a _form_temp_ variable, which is the formulation of the drug of either pill/table or patch. However, there were only one observation that had the form of patch, which is insufficient for our analysis. Therefore, we decided to exclude the _form_temp_ variable. Additionaly, we had 2 variables for which dosage was 1, which is unlikely for a drug like Tramadol; we delete these rows as well. 
+
+# Exploratory Data Analysis
+
+We first investigated our outcome of interest, which is the _ppm_ variable. After plotting a histogram, we observed that the distribution of _ppm_ is extremely right skewed. This prompted us to perform a log transformation, and the results showed a much more normal distribution. We will proceed with _log(ppm)_ as our response variable. 
+
+```{r ppm-vs-log-ppm, fig.width=7, fig.height=3, fig.align="center"}
+ppm_plot <- ggplot(dta,aes(ppm)) +
+  geom_histogram(aes(y = ..density..), color = "black", linetype = "dashed",
+                 fill = rainbow(15), bins=15) + 
+  theme(legend.position = "none") +
+  geom_density(alpha = .25, fill = "lightblue") + 
+  scale_fill_brewer(palette = "Blues") +
+  labs(title = "Figure 1: Distribution of Price per mg", 
+       y = "Density",
+       x = "Price per Mg") + 
+  theme_classic() +  theme(legend.position="none",axis.text=element_text(size=12),axis.title=element_text(size=9,face="bold"),plot.title = element_text(size = 10, face = "bold"))
+
+dta$logppm=log(dta$ppm)
+
+log_ppm_plot <- ggplot(dta, aes(logppm)) +
+  geom_histogram(aes(y = ..density..), color = "black", linetype = "dashed",
+                 fill = rainbow(15), bins=15) + 
+  theme(legend.position = "none") +
+  geom_density(alpha = .25, fill="lightblue") +
+  scale_fill_brewer(palette = "Blues") +
+  labs(title = "Figure 2: Distribution of Log(Price) per mg",
+       y = "Density",
+       x = "log(Price) per mg") + 
+  theme_classic() +  theme(legend.position="none",axis.text=element_text(size=12),axis.title=element_text(size=9,face="bold"),plot.title = element_text(size = 10, face = "bold"))
+
+plot_grid(ppm_plot, log_ppm_plot, nrow = 1, rel_widths = c(0.5, 0.5))
+
+```
+
+Since we are interested in exploring the heterogeneity of the price of Tramadol by location, the boxplot below shows the log(price) of Tramadol by a subset of states. Results show that there is indeed variation between locations. In addition, since states are nested within US regions, a boxplot of Tramadol prices by region did also show variation. Therefore, we will include both states and regions as random effects of our model.
+
+From examining the price variable, we discovered that the minimum value is 0.000033 while the maximum value is 5.56. This means that there are possible outliers in the model, which is also depicted in the boxplot below. However, due to the nature of the data set, there is not a suitable way to verify whether an observation is an outlier or not. Therefore, we will keep this in mind during our analysis and have decided not to remove the outliers. 
+
+```{r levels, fig.width=5, fig.height=3, fig.align="center"}
+set.seed(1000)
+sample_state <- sample(unique(dta$state),10,replace=F)
+
+ggplot(dta[is.element(dta$state,sample_state),], aes(x = state, y = logppm, fill = state)) +
+  geom_boxplot() +
+  labs(title="Figure 3: log(Price) of Tramadol by State",
+       x="State",y="log(Price)") + 
+  theme_classic() +
+  scale_fill_brewer(palette="BuPu")+  theme(legend.position="none",axis.text=element_text(face="bold",size=6,angle=45),axis.title=element_text(size=12,face="bold"),plot.title = element_text(size = 10, face = "bold"))
+
+
+### fix axis text so it doesn't cross through x axis ###
+```
+Lastly, we explored any potential interaction effects that should be included in our model. As seen from the figure below, we see that the price of Tramadol for those that were bulk purchases are influenced by the source of the information. No other interaction effects that we experimented with were deemed significant. Therefore, we will include this interaction effect in our model. 
+
+```{r bulk-source-interaction, fig.width=5, fig.height=3, fig.align="center"}
+ggplot(dta, aes(x = bulk_purchase, y = logppm, fill = source_new)) +
+  geom_boxplot(outlier.shape = NA) +
+  scale_fill_brewer(palette = "Blues") + 
+  coord_flip() +
+  labs(title = "Figure 4: Interaction between Bulk Purchase and Source",
+       x = "Bulk Purchase",
+       y = "log(Price)",
+       fill = "Source") + 
+  theme_classic() + 
+  theme(legend.position="right")+  theme(legend.position="none",axis.text=element_text(face="bold",size=6),axis.title=element_text(size=12,face="bold"),plot.title = element_text(size = 10, face = "bold"))
+```
+
+# Hierarchical Linear Regression Model
+
+Our initial model included fixed effects of _mgstr_, _bulk_purchase_ and _source_. As mentioned in our exploratory data analysis, we expect there to be an interaction effect between _bulk_purchase_ and _source_. After fitting a simple linear regression model with and without the interaction, an analysis of variance (ANOVA) test showed a p-value of 0.027, which is below the 0.05 threshold. Therefore, we will include this term in our final model. We also conducted a backward AIC with the full model being a linear model with all possible main effects and interacts. AIC confirmed the results of our EDA, and the final model only had the main effects and the one interaction in it. Next, we wanted to determine whether varying slopes between _bulk_purchase_ and _state_ and _source_ and _state_ are statistically significant. After fitting a hierarchical linear regression model for both and performing an ANOVA test with the simple linear regression model mentioned before, results showed p-values of 0.228 and 0.948, which are well above the threshold. We will proceed without any varying slopes in our model. 
+
+As seen from the figures in our EDA, we expect the price of Tramadol to varying by location. Since geographically, states are nested within US regions, we then determined whether we should include only _state_ as the random effect or include both _state_ and _USA_region_. After fitting two hierarchical linear regression models with and without _USA_region_ as the varying intercept in addition to state and the fixed effects mentioned above, an ANOVA test produced a p-value of 0.01. In addition, the model with two varying intercepts has an AIC value of 14934.55 while the model with only one varying intercept has an AIC value of 14941.98. Therefore, our final model will include both state and US regions as the random effects. The mathematical representation and model output of our final model is shown below.
+\newline
+$log(Price_{ijk}) = (\beta_0 + \gamma_{0k} + \gamma_{0jk}) + \beta_1 bulk\_purchase_i + \sum_{a=1}^7 \beta_{2a} [mgstr_i = a] + \sum_{b=1}^5 \beta_{3b} [source_i=b] + \sum_{b=1}^5 \beta_{4b} bulk\_purchase_i:[source_i = b] + \epsilon_{ijk}; i = 1,...,n_j; j = 1,...,J$
+\newline
+where $a$ takes on different levels of the dosage variable and $b$ takes on different levels of the source variable.  
+\newline
+$\epsilon_{ijk} \sim \mathcal{N}(0,\sigma^2)$
+\newline
+$(\gamma_{0k}, \gamma_{0jk}) \sim \mathcal{N_2}(\mathbf{0},\Sigma)$
+
+```{r final-model, include = FALSE}
+Model7<- lmer(logppm ~ mgstr_f + bulk_purchase*source_new + (1 | state)+ (1 | USA_region), data = dta)
+
+fixed <- as.data.frame(coef(summary(Model7)))
+ci <- as.data.frame(confint(Model7))[4:19,]
+output <- round(cbind(fixed, ci), digits = 3)
+```
+
+```{r final-model-output, fig.align="center"}
+kable(output,
+      caption = "Hierarchical Linear Regression Model Output") %>% 
+  kable_styling(position = "center", latex_options = "HOLD_position", font_size = 10) %>% 
+  add_header_above(c("Fixed Effects", "", "", "", "", ""))
+
+random <- data.frame(Groups = c("state", "USA_region", "Residual"),
+                     Variance = c(0.0002, 0.0457, 1.150),
+                     Std.Dev = c(0.013, 0.214, 1.077))
+kable(random) %>% 
+  kable_styling(position = "center", latex_options = "HOLD_position", font_size = 10) %>% 
+  add_header_above(c("Random Effects", "", ""))
+```
+
+## Model Assumptions
+
+With our final model, we performed various diagnostics to assess model assumptions. Since, most variables in our dataset are discrete, we are concerned mostly about the independence and normality of residuals assumption. On plotting residual vs fitted value plots (below), we see that the independence assumption can be improved; while there is randomness in the Y axis, points are clustered on the X axis, probably due to missing variables. Further variance is not constant. The plot of residuals of the final model also showed that many points deviated from the 45 degree line. The QQ plot of the model is shown below. This indicates that there is a violation of the normality assumption with our model. We have already performed a log transformation on the response variable. In addition, we also try to remove the aforementioned outliers in hopes to fix this issue yet it showed minimal improvement. The removal of the outliers only marginally changed the model, indicating that these observations are not high influential points. Given the nature of the data, we decided that it was best to proceed. The Variance Inflation Factors (VIF) of the final model are all below 10, implying that there are no issues of multicollinearity. 
+
+```{r fig.width=5, fig.height=3.5, fig.show="hold", out.width="47%",fig.align="center"}
+plot(fitted(Model7),residuals(Model7),xlab="Fitted values", ylab = "Residuals", main="Figure 5: Residuals vs Fitted Values") 
+qqnorm(residuals(Model7),main="Figure 6: Normal Q-Q plot")
+```
+
+# Model Interpretation
+
+The baseline of our final model is Tramadol of 1mg dosage, non-bulk purchase where the source of the information comes from Others and we expect the price per mg to be $e^{0.66} = \$1.93$. When the purchase is in bulk, keeping all else constant, the price per mg of Tramadol is expected to increase by a multiplicative effect of $e^{0.018} = 1.02$, which is about a 2% increase. All dosage indicators are significant and higher dosages are associated with lower prices. For example, compared to the baseline of 37.5mg, a dosage of 300mg (keeping all else constant) leads to a decrease in price by 1- $e^{-1.98} = 0.13$, which is about 87%.
+
+The estimated standard error for state is 0.013, which describes the across state variation attributed to the random intercept. For regions, the standard deviation is 0.21. This implies that ppm of Tramadol is varying more by region, than it is by state. Further since state and region are nested in nature, we expect the overall geographical variation in prices to get distributed between the two. The estimated standard error of the residual of the model is 1.14, which describes the within-state/region or the remaining unexplained variation. As seen from the figure below, our model is not statistically significant for th Midwest region but it is for the remaining regions. 
+
+```{r across-region, fig.width=5, fig.height=3, fig.align="center"}
+dotplot(ranef(Model7,condVar=TRUE))$USA_region
+```
+
+## Limitations
+
+In the process of our analysis, we noted several limitations that could be improved upon with future work. First, StreetRx is a crowd sourcing website where users can input any information they want. This means that there are no methods to check for the accuracy of our data. For example, the dataset contained 7 observations where the prices of Tramadol were missing yet other information such as state and USA_region had an input. Second, we also removed the variable indicating the form of the drug as there were only 1 observation for "patch" while the remainder were all "pill/tablet". Intuitively, this should be an important variable in predicting the price of Tramadol yet was excluded from our analysis due to the lack of data. We also removed the date variable indicating the time when the drug was purchased. This could also be a significant variable as the price of Tramadol could be changing over time. Lastly, we noted that several model assumptions of our final model were not met. As mentioned before, this is likely due to the fact that we dropped several potentially significant variables and were only working with a subset of the data. 
+
+# Conclusion
+
+The opioid crisis in the United States is an urgent issue that desperately needs a solution. Our analysis showed that there is a clustering effect of price of Tramadol that varies across US regions. In addition, we also identified the dosage of Tramadol and when the source of information is internet pharmacy to be influential factors for the price per mg of Tramadol. This analysis is crucial in gaining insights regarding the opaque black market of illegal prescription substances, which would hopefully contribute to the continued effort of resolving the opioid epidemic. The clustering of price by region would aid in creating policies that are more suitable for local communities. To build upon our current analysis, we could potentially investigate whether a state's legalization status of marijuana contributes to the street price of other narcotics. Marijuana, which currently is often used medically to treat chronic pains, could be a better alternative to addictive pain-relief substances. 
+
+
+
+
+
+
+

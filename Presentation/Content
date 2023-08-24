@@ -1,0 +1,8 @@
+Slides
+
+1. Introducing the problem (make this tramadol specific so it's not boring)  
+2. Data manipulation (Talk about outliers, the USA label, the form variable, the sources), Response Variable transormation 
+3. EDA: prices differ by State & Region or EDA: Interaction for bulk purchase & source
+4. Regression Summary
+5. What does this mean?
+6. Limitations (don't meet assumptions, need more variables) & Conclusion
